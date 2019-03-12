@@ -140,3 +140,13 @@ func logoutSessionUser(db *Dbsession, user1 User, token1 string) bool {
 	}
 	return false
 }
+
+//Veririfcar se a sessao e valida
+func verifySession(db *Dbession, user1 User, token1 string) bool {
+	for i := 0; i < len((*db).sessions); i++ {
+		if user1.email == (*db).sessions[i].user.email && (*db).sessions[i].token == token1 {
+			return true
+		}
+	}
+	return false
+}
