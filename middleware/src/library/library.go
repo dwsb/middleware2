@@ -32,16 +32,19 @@ type Book struct {
 
 type ServiceResponse struct {
 	Books []*Book
-	Error error
+	Error string
 }
 
-const template string = `Name: %s
+const (
+	template string = `Name: %s
 Description: %s
 PublishDate: %s
 Author: %s
 Categories: %s
 
 `
+	bufferSize = 4096
+)
 
 func (b *Book) String() string {
 	return fmt.Sprintf(template, b.Name, b.Description, b.PublishDate, b.Author, b.Categories)

@@ -2,7 +2,7 @@ package messages
 
 type UserAuthResponse struct {
 	Token string
-	Error error
+	Error string
 }
 
 type IsLoggedAuthResponse struct {

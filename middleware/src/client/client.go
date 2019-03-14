@@ -55,7 +55,7 @@ func (c *Client) closeServiceConnection() {
 	c.ServiceConnection = nil
 }
 
-func (c *Client) Login(login, password string) (messages.UserAuthResponse, error) {
+func (c *Client) Login(login, password string) messages.UserAuthResponse {
 	c.openAuthConnection(c.Protocol, c.AuthPort)
 	defer c.closeAuthConnection()
 
@@ -72,13 +72,13 @@ func (c *Client) Login(login, password string) (messages.UserAuthResponse, error
 
 	message, err := bufio.NewReader(c.AuthConnection).ReadBytes('\n')
 	if err != nil {
-		return messages.UserAuthResponse{}, err
+		return messages.UserAuthResponse{}
 	}
 
 	var response messages.UserAuthResponse
-	err = json.Unmarshal(message, &response)
+	_ = json.Unmarshal(message, &response)
 
-	return response, err
+	return response
 }
 
 func (c *Client) Books(token string) (library.ServiceResponse, error) {
@@ -89,7 +89,7 @@ func (c *Client) Books(token string) (library.ServiceResponse, error) {
 		Token: token,
 	}
 
-	bytes, _ := json.Marshal(&request)
+	bytes, _ := json.Marshal(request)
 	c.ServiceConnection.Write(utils.EncodeString("list"))
 	bufio.NewReader(c.ServiceConnection).ReadBytes('\n') // wait ok connection from library server
 	c.ServiceConnection.Write(utils.Encode(bytes))

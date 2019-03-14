@@ -34,3 +34,5 @@ var logins = []*library.User{
 		Password: "michiles",
 	},
 }
+
+const bufferSize = 4096

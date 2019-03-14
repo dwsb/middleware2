@@ -17,12 +17,18 @@ var isLogged = make(map[string]string, 4)
 
 // StartServer ... starts the auth server
 func StartServer(protocol, port string) {
-
-	if strings.ToLower(protocol) != "tcp" && strings.ToLower(protocol) != "udp" {
+	switch strings.ToLower(protocol) {
+	case "tcp":
+		TCPServer(protocol, port)
+	case "udp":
+		UDPServer(protocol, port)
+	default:
 		fmt.Println("Protocolo inválido.")
 		return
 	}
+}
 
+func TCPServer(protocol, port string) {
 	listener, err := net.Listen(protocol, fmt.Sprintf(":%s", port))
 	if err != nil {
 		fmt.Println(err)
@@ -38,6 +44,15 @@ func StartServer(protocol, port string) {
 
 		go handdleConnection(conn)
 	}
+}
+
+func UDPServer(protocol, port string) {
+	pc, err := net.ListenPacket("udp", fmt.Sprintf(":%s", port))
+	if err != nil {
+		return
+	}
+
+	go handdleUDPConnection(pc)
 }
 
 func handdleConnection(conn net.Conn) {
@@ -60,16 +75,20 @@ func handdleConnection(conn net.Conn) {
 		switch action {
 		case "login":
 			var msgRequest messages.UserAuthRequest
+
 			err = json.Unmarshal(bytesRequest, &msgRequest)
 			if err != nil {
-				bytes, _ := json.Marshal(&messages.UserAuthResponse{Error: InvalidRequestError{}})
+				bytes, _ := json.Marshal(&messages.UserAuthResponse{Error: InvalidRequestError{}.Error()})
 				conn.Write(utils.Encode(bytes))
 				continue
 			}
 
-			processLogin(conn, msgRequest)
+			bytes := processLogin(msgRequest)
+			conn.Write(utils.Encode(bytes))
+
 		case "isLogged":
 			var msgRequest messages.IsLoggedAuthRequest
+
 			err = json.Unmarshal(bytesRequest, &msgRequest)
 			if err != nil {
 				// adicionar erro ao messages.IsLoggedAuthResponse
@@ -78,35 +97,89 @@ func handdleConnection(conn net.Conn) {
 				continue
 			}
 
-			processIsLogged(conn, msgRequest)
+			bytes := processIsLogged(msgRequest)
+			conn.Write(utils.Encode(bytes))
 		}
 	}
 }
 
-func processIsLogged(conn net.Conn, request messages.IsLoggedAuthRequest) {
+func handdleUDPConnection(conn net.PacketConn) {
+	defer conn.Close()
+
+	for {
+		fmt.Printf("Auth Serving %s\n", conn.LocalAddr().String())
+
+		bytesAction := make([]byte, bufferSize)
+		nBytes, addr, err := conn.ReadFrom(bytesAction)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		action := string(bytesAction[:nBytes])
+		action = utils.FormatString(action)
+
+		conn.WriteTo(utils.EncodeString("ok"), addr) // send ok connection
+
+		bytesRequest := make([]byte, bufferSize)
+		nBytes, addr, err = conn.ReadFrom(bytesRequest)
+		if err != nil {
+			return
+		}
+
+		switch action {
+		case "login":
+			var msgRequest messages.UserAuthRequest
+
+			err = json.Unmarshal(bytesRequest[:nBytes], &msgRequest)
+			if err != nil {
+				bytes, _ := json.Marshal(&messages.UserAuthResponse{Error: InvalidRequestError{}.Error()})
+				conn.WriteTo(utils.Encode(bytes), addr)
+				continue
+			}
+
+			bytes := processLogin(msgRequest)
+			conn.WriteTo(utils.Encode(bytes), addr)
+		case "isLogged":
+			var msgRequest messages.IsLoggedAuthRequest
+
+			err = json.Unmarshal(bytesRequest[:nBytes], &msgRequest)
+			if err != nil {
+				bytes, _ := json.Marshal(messages.IsLoggedAuthResponse{Result: false})
+				conn.WriteTo(utils.Encode(bytes), addr)
+				continue
+			}
+
+			bytes := processIsLogged(msgRequest)
+			conn.WriteTo(utils.Encode(bytes), addr)
+		}
+	}
+}
+
+func processIsLogged(request messages.IsLoggedAuthRequest) []byte {
 	result := isLogged[utils.FormatString(request.Token)] != ""
 
 	bytes, _ := json.Marshal(messages.IsLoggedAuthResponse{Result: result})
-	conn.Write(utils.Encode(bytes))
+	return bytes
 }
 
-func processLogin(conn net.Conn, request messages.UserAuthRequest) {
+func processLogin(request messages.UserAuthRequest) []byte {
 	result := validateLogin(request.Login, request.Password)
 
 	var token string
-	var err error
+	var err string
 
 	if result != -1 {
 		token = generateToken()
+
 		logins[result].Token = token
 		isLogged[token] = "ok"
-		err = nil
 	} else {
-		err = NotFoundError{}
+		err = NotFoundError{}.Error()
 	}
 
 	bytes, _ := json.Marshal(messages.UserAuthResponse{Token: token, Error: err})
-	conn.Write(utils.Encode(bytes))
+	return bytes
 }
 
 func validateLogin(login, password string) int {

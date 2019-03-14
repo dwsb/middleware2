@@ -30,6 +30,7 @@ func main() {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
+
 	for {
 		fmt.Println("Escolha uma das opções abaixo: ")
 		fmt.Println("1 - Login")
@@ -63,9 +64,9 @@ func login() {
 	user.Login = login
 	user.Password = password
 
-	response, err := client.Login(login, password)
-	if err != nil {
-		fmt.Println(err)
+	response := client.Login(login, password)
+	if response.Error != "" {
+		fmt.Println(response.Error)
 		return
 	}
 
@@ -80,7 +81,7 @@ func books() {
 		return
 	}
 
-	if booksResponse.Error != nil {
+	if booksResponse.Error != "" {
 		fmt.Println(booksResponse.Error)
 		return
 	}
