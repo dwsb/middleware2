@@ -8,6 +8,8 @@ import (
 	"middleware2/middleware/src/utils"
 	"net"
 	"strings"
+
+	"github.com/streadway/amqp"
 )
 
 var library Library
@@ -54,6 +56,40 @@ func UDPServer(protocol, port string) {
 	}
 
 	go handdleUDPConnection(pc)
+}
+
+func RabbitMQServer() {
+	ch, err := utils.ConnectRabbitMQ()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	q, err := utils.DeclareQueue("library_service", ch)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	msgs, err := utils.ConsumeQueue(q.Name, ch)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for {
+		go consumeMessages(msgs)
+	}
+
+}
+
+func consumeMessages(msgs <-chan amqp.Delivery) {
+	for msg := range msgs {
+		switch string(msg.Body)[:4] {
+		case "list":
+			fmt.Println("listar os livros")
+		}
+	}
 }
 
 func handdleUDPConnection(conn net.PacketConn) {

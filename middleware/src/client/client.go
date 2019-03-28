@@ -56,6 +56,98 @@ func (c *Client) closeServiceConnection() {
 }
 
 func (c *Client) Login(login, password string) messages.UserAuthResponse {
+	switch c.Protocol {
+	case "rabbitmq":
+		return rabbitMQLogin("auth_service", login, password)
+	default:
+		return RequestLogin(c, login, password)
+	}
+}
+
+func (c *Client) Books(token string) (library.ServiceResponse, error) {
+	switch c.Protocol {
+	case "rabbitmq":
+		return rabbitMQBooks("library_service", token)
+	default:
+		return RequestBooks(c, token)
+	}
+}
+
+func rabbitMQLogin(name, login, password string) messages.UserAuthResponse {
+	ch, err := utils.ConnectRabbitMQ()
+	if err != nil {
+		return messages.UserAuthResponse{}
+	}
+
+	q, err := utils.DeclareQueue(name, ch)
+	if err != nil {
+		return messages.UserAuthResponse{}
+	}
+
+	request := messages.UserAuthRequest{
+		Login:    login,
+		Password: password,
+	}
+
+	bytes, _ := json.Marshal(request)
+
+	err = utils.PublishQueue(q.Name, "application/json", utils.EncodeString("login"+string(bytes)), ch)
+	if err != nil {
+		return messages.UserAuthResponse{}
+	}
+
+	// consume messages
+	return messages.UserAuthResponse{}
+}
+
+func rabbitMQBooks(name string, token string) (library.ServiceResponse, error) {
+	ch, err := utils.ConnectRabbitMQ()
+	if err != nil {
+		return library.ServiceResponse{}, err
+	}
+
+	q, err := utils.DeclareQueue(name, ch)
+	if err != nil {
+		return library.ServiceResponse{}, err
+	}
+
+	request := messages.ServiceRequest{
+		Token: token,
+	}
+
+	bytes, _ := json.Marshal(request)
+
+	err = utils.PublishQueue(q.Name, "application/json", utils.EncodeString("list"+string(bytes)), ch)
+
+	// get answers
+	return library.ServiceResponse{}, err
+}
+
+func RequestBooks(c *Client, token string) (library.ServiceResponse, error) {
+	c.openServiceConnection(c.Protocol, c.ServicePort)
+	defer c.closeServiceConnection()
+
+	request := messages.ServiceRequest{
+		Token: token,
+	}
+
+	bytes, _ := json.Marshal(request)
+	c.ServiceConnection.Write(utils.EncodeString("list"))
+	bufio.NewReader(c.ServiceConnection).ReadBytes('\n') // wait ok connection from library server
+	c.ServiceConnection.Write(utils.Encode(bytes))
+
+	message, err := bufio.NewReader(c.ServiceConnection).ReadBytes('\n')
+	if err != nil {
+		return library.ServiceResponse{}, err
+	}
+
+	var response library.ServiceResponse
+	err = json.Unmarshal(message, &response)
+
+	return response, err
+}
+
+func RequestLogin(c *Client, login, password string) messages.UserAuthResponse {
 	c.openAuthConnection(c.Protocol, c.AuthPort)
 	defer c.closeAuthConnection()
 
@@ -79,28 +171,4 @@ func (c *Client) Login(login, password string) messages.UserAuthResponse {
 	_ = json.Unmarshal(message, &response)
 
 	return response
-}
-
-func (c *Client) Books(token string) (library.ServiceResponse, error) {
-	c.openServiceConnection(c.Protocol, c.ServicePort)
-	defer c.closeServiceConnection()
-
-	request := messages.ServiceRequest{
-		Token: token,
-	}
-
-	bytes, _ := json.Marshal(request)
-	c.ServiceConnection.Write(utils.EncodeString("list"))
-	bufio.NewReader(c.ServiceConnection).ReadBytes('\n') // wait ok connection from library server
-	c.ServiceConnection.Write(utils.Encode(bytes))
-
-	message, err := bufio.NewReader(c.ServiceConnection).ReadBytes('\n')
-	if err != nil {
-		return library.ServiceResponse{}, err
-	}
-
-	var response library.ServiceResponse
-	err = json.Unmarshal(message, &response)
-
-	return response, err
 }

@@ -1,0 +1,8 @@
+version: "2"
+services:
+ rabbitmq-management:
+   container_name: rabbitmq_management
+   image: rabbitmq:management
+   ports:
+     - 8181:15672
+     - 5672:5672

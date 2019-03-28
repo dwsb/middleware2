@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	uuid "github.com/satori/go.uuid"
+	"github.com/streadway/amqp"
 
 	"middleware2/middleware/src/messages"
 	"middleware2/middleware/src/utils"
@@ -22,6 +23,8 @@ func StartServer(protocol, port string) {
 		TCPServer(protocol, port)
 	case "udp":
 		UDPServer(protocol, port)
+	case "rabbitmq":
+		RabbitMQServer()
 	default:
 		fmt.Println("Protocolo inválido.")
 		return
@@ -53,6 +56,42 @@ func UDPServer(protocol, port string) {
 	}
 
 	go handdleUDPConnection(pc)
+}
+
+func RabbitMQServer() {
+	ch, err := utils.ConnectRabbitMQ()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	q, err := utils.DeclareQueue("auth_service", ch)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	msgs, err := utils.ConsumeQueue(q.Name, ch)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for {
+		go consumeMessages(msgs)
+	}
+
+}
+
+func consumeMessages(msgs <-chan amqp.Delivery) {
+	for msg := range msgs {
+		switch string(msg.Body)[:5] {
+		case "login":
+			fmt.Println("fazer login")
+		case "verif":
+			fmt.Println("verificar login")
+		}
+	}
 }
 
 func handdleConnection(conn net.Conn) {
@@ -193,6 +232,5 @@ func validateLogin(login, password string) int {
 }
 
 func generateToken() string {
-	id, _ := uuid.NewV4()
-	return id.String()
+	return uuid.NewV4().String()
 }
