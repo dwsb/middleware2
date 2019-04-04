@@ -1,87 +1,94 @@
 package library
 
 import (
-	"fmt"
+	"encoding/json"
+	"errors"
+	"middleware2/middleware/src/models"
+	"middleware2/middleware/src/rabbitmq/consumer"
+	"middleware2/middleware/src/rabbitmq/producer"
+	"net/rpc"
 )
+
+const CONTENT_TYPE = "application/json"
 
 type Library struct {
-	Protocol string
-	AuthPort string
+	books       []*models.Book
+	authAddress string
 }
 
-type NotLoggedError struct {
+func New(books []*models.Book, authAddress string) *Library {
+	library := new(Library)
+	library.books = books
+	library.authAddress = authAddress
+
+	return library
 }
 
-func (e NotLoggedError) Error() string {
-	return "User not logged in"
+func NewMQ(books []*models.Book) *Library {
+	library := new(Library)
+	library.books = books
+
+	return library
 }
 
-type User struct {
-	Login    string
-	Password string
-	Token    string
-}
+func (l *Library) ListRPC(request models.ListRequest, res *models.ListResponse) error {
+	client, err := rpc.Dial("tcp", l.authAddress)
 
-type Book struct {
-	Name        string
-	Description string
-	PublishDate string
-	Author      string
-	Categories  []string
-}
-
-type ServiceResponse struct {
-	Books []*Book
-	Error string
-}
-
-const (
-	template string = `Name: %s
-Description: %s
-PublishDate: %s
-Author: %s
-Categories: %s
-
-`
-	bufferSize = 4096
-)
-
-func (b *Book) String() string {
-	return fmt.Sprintf(template, b.Name, b.Description, b.PublishDate, b.Author, b.Categories)
-}
-
-func Books() []*Book {
-	return []*Book{
-		&Book{
-			Name:        "Medicina Interna de Harrison - 2 Volumes",
-			Description: "Apresentando os extraordinários avanços ocorridos em todas as áreas da medicina, esta nova edição do Harrison foi amplamente revisada para oferecer uma atualização completa sobre a patogênese das doenças, ensaios clínicos, técnicas de diagnóstico, diretrizes clínicas baseadas em evidências, tratamentos já estabelecidos e métodos recentemente aprovados",
-			PublishDate: "21 nov 2016",
-			Author:      " Dennis L. Kasper, Stephen L. Hauser, J. Larry Jameson, Anthony S. Fauci, Dan L. Longo, Joseph Loscalzo",
-			Categories: []string{
-				"Medicina",
-				"Especialidades",
-			},
-		},
-		&Book{
-			Name:        "Netter Atlas de Anatomia Humana 7ª edição",
-			Description: "É um dos nomes mais fortes mundialmente na área de Anatomia, reconhecido pela didática e clareza de suas ilustrações. Figuras modernas, que, em um volume, apresenta todo o corpo humano em descrições detalhadas e clinicamente relevantes",
-			PublishDate: "8 dez 2018",
-			Author:      "Frank H. Netter",
-			Categories: []string{
-				"Medicina",
-				"Anatomia",
-			},
-		},
-		&Book{
-			Name:        "Cultura Inglesa. Go Beyond - Caixa com Worbook: Student's Pack With Worbook",
-			Description: "Go Beyond is an exciting 6-level American English course for teenagers learning English. The course covers CEFR levels A1+ through to B2, + all levels being based on mapping of the requirements of the CEFR and international exams.",
-			PublishDate: "2 out 2018",
-			Author:      "Rebbeca Robb Benne",
-			Categories: []string{
-				"Inglês e outras línguas",
-				"Educação",
-				"Didáticos",
-			},
-		},
+	if err != nil {
+		return err
 	}
+
+	var response models.IsLoggedResponse
+	err = client.Call("Auth.IsLogged", models.IsLoggedRequest{Token: request.Token}, &response)
+
+	if err != nil {
+		return err
+	}
+
+	if !response.Result {
+		return errors.New("Usuario not logged")
+	}
+
+	res.Books = l.books
+	return nil
+}
+
+func (l *Library) ListRabbitMQ() error {
+	consumer := new(consumer.Consumer)
+	consumer.Connect("list")
+	answer, err := consumer.Consume(CONTENT_TYPE)
+	if err != nil {
+		return err
+	}
+
+	var request models.ListRequest
+	err = json.Unmarshal(answer, &request)
+	if err != nil {
+		return err
+	}
+
+	producer := new(producer.Producer)
+	err = producer.Connect("isLogged")
+	if err != nil {
+		return err
+	}
+
+	bytes, _ := json.Marshal(request)
+	reply, err := producer.ProduceAndWaitReply(bytes, "application/json")
+	if err != nil {
+		return err
+	}
+
+	var isLogged models.IsLoggedResponse
+	json.Unmarshal(reply, &isLogged)
+
+	if !isLogged.Result {
+		return errors.New("não está logado")
+	}
+
+	var res *models.ListResponse
+	res.Books = l.books
+
+	bytes, _ = json.Marshal(res)
+	return consumer.Reply(bytes, CONTENT_TYPE)
 }
