@@ -2,26 +2,24 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
-	"net/rpc"
+	"middleware2/middleware/src/auth"
+	"middleware2/middleware/src/library"
 	"os"
 	"strings"
 
-	"middleware2/middleware/src/auth"
-	"middleware2/middleware/src/library"
 	"middleware2/middleware/src/models"
-	"middleware2/middleware/src/rpc/server"
+	"middleware2/middleware/src/rabbitmq/producer"
 	"middleware2/middleware/src/utils"
 )
 
-var (
-	user          models.User
-	authClient    *rpc.Client
-	libraryClient *rpc.Client
-)
+const CONTENT_TYPE = "application/json"
 
-const PROTOCOL = "tcp"
-const HOST = "localhost:"
+var (
+	user   models.User
+	client *producer.Producer
+)
 
 var LOGINS = []*models.User{
 	&models.User{
@@ -77,28 +75,14 @@ var BOOKS = []*models.Book{
 }
 
 func main() {
-	authPort := os.Args[1]
-	libraryPort := os.Args[2]
+	client = new(producer.Producer)
 
-	auth := auth.New(LOGINS)
-	library := library.New(BOOKS, HOST+authPort)
+	authServer := auth.New(LOGINS)
+	libraryServer := library.NewMQ(BOOKS)
 
-	server.Start("Auth", auth, HOST+authPort)
-	server.Start("Library", library, HOST+libraryPort)
-
-	var authErr, libraryErr error
-	authClient, authErr = rpc.Dial(PROTOCOL, HOST+authPort)
-	libraryClient, libraryErr = rpc.Dial(PROTOCOL, HOST+libraryPort)
-
-	if authErr != nil {
-		fmt.Println(authErr)
-		return
-	}
-
-	if libraryErr != nil {
-		fmt.Println(libraryErr)
-		return
-	}
+	go authServer.LoginRabbitMQ()
+	go authServer.IsLoggedRabbitMQ()
+	go libraryServer.ListRabbitMQ()
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -135,24 +119,46 @@ func login() {
 	user.Login = login
 	user.Password = password
 
-	var loginResponse models.LoginResponse
-	loginErr := authClient.Call("Auth.Login", models.LoginRequest{Login: login, Password: password}, &loginResponse)
+	request := models.LoginRequest{Login: login, Password: password}
+	bytes, _ := json.Marshal(request)
+	client.Connect("login")
+	defer client.Close()
+	fmt.Println("Login connected")
+	bytes, err := client.ProduceAndWaitReply(bytes, CONTENT_TYPE)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
+	fmt.Println("Get login response")
+	var loginResponse models.LoginResponse
+	loginErr := json.Unmarshal(bytes, &loginResponse)
 	if loginErr != nil {
 		fmt.Println(loginErr)
 		return
 	}
 
-	fmt.Println("User logged in successfuly")
+	fmt.Println("User logged in successfuly. Token: " + loginResponse.Token)
 	user.Token = loginResponse.Token
+
 }
 
 func books() {
-	var listResponse models.ListResponse
-	libraryErr := libraryClient.Call("Library.ListRPC", models.ListRequest{Token: user.Token}, &listResponse)
+	request := models.ListRequest{Token: user.Token}
+	bytes, _ := json.Marshal(request)
+	client.Connect("list")
+	defer client.Close()
 
-	if libraryErr != nil {
-		fmt.Println(libraryErr)
+	bytes, err := client.ProduceAndWaitReply(bytes, CONTENT_TYPE)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var listResponse models.ListResponse
+	err = json.Unmarshal(bytes, &listResponse)
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
 

@@ -27,18 +27,22 @@ func FormatString(s string) string {
 	return s
 }
 
-func ConnectRabbitMQ() (*amqp.Channel, error) {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:1234")
+func ConnectRabbitMQ(name string) (channel *amqp.Channel, queue amqp.Queue, queueReply amqp.Queue, err error) {
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672")
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	ch, err := conn.Channel()
-	return ch, err
+	channel, err = conn.Channel()
+
+	queue, err = DeclareQueue(name, channel)
+	queueReply, err = DeclareQueue(name+"reply", channel)
+
+	return
 }
 
 func DeclareQueue(name string, ch *amqp.Channel) (amqp.Queue, error) {
-	return ch.QueueDeclare("teste", false, false, false, false, nil)
+	return ch.QueueDeclare(name, false, false, false, false, nil)
 }
 
 func ConsumeQueue(name string, ch *amqp.Channel) (<-chan amqp.Delivery, error) {
